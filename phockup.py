@@ -95,6 +95,18 @@ Example:
             """,
     )
 
+    exclusive_group_link_move.add_argument(
+        '--rename-in-place',
+        action='store_true',
+        help="""\
+            Rename files in place without copying or moving them to a new
+            directory. This is intended for bulk renames when files are
+            already organized in the correct OUTPUTDIR hierarchy. The tool
+            will verify that each file's directory matches the expected
+            year/month/day path and skip any that do not.
+            """,
+    )
+
     parser.add_argument(
         '-o',
         '--original-names',
@@ -114,6 +126,17 @@ Example:
             If the user supplies a regex, it will be used if it finds a match in the filename.
             This option is intended as "last resort" since the file modified date may not be
             accurate, nevertheless it can be useful if no other date information can be obtained.
+            """,
+    )
+
+    parser.add_argument(
+        '--ctime',
+        action='store_true',
+        help="""\
+            If the date cannot be retrieved from EXIF (or from filename via regex), use the
+            file's creation time instead. On supported systems this is the birth time; otherwise
+            the file's ctime (status change time) is used. Ignored if --timestamp is also used
+            and filename date is not found (--ctime takes precedence over --timestamp in that case).
             """,
     )
 
@@ -340,6 +363,54 @@ Example:
             """,
     )
 
+    parser.add_argument(
+        '--camera-name-mode',
+        type=str,
+        choices=['prefix', 'suffix'],
+        default=None,
+        help="""\
+            If set, include the camera name (from EXIF Make/Model) in the generated
+            filename. Use:
+
+              --camera-name-mode=prefix  -> <camera>_YYYYMMDD-hhmmss.jpg
+              --camera-name-mode=suffix  -> YYYYMMDD-hhmmss_<camera>.jpg
+
+            When not set, filenames do not include camera information.
+            """,
+    )
+
+    parser.add_argument(
+        '--other-dir',
+        type=str,
+        default=None,
+        metavar='DIR',
+        help="""\
+            Collect non-image and non-video files into a dedicated folder under
+            OUTPUTDIR instead of the default "unknown" directory. Example:
+            --other-dir=documents
+            """,
+    )
+
+    parser.add_argument(
+        '--fast-mode',
+        action='store_true',
+        default=False,
+        help="""\
+            Reduce per-file logging and progress output for higher throughput on
+            large collections. Implies no progress bar even if --progress is set.
+            """,
+    )
+
+    parser.add_argument(
+        '--use-process-pool-for-exif',
+        action='store_true',
+        default=False,
+        help="""\
+            Parse EXIF/date metadata in a process pool. This can help when EXIF
+            extraction is CPU-bound and --max-concurrency is greater than 1.
+            """,
+    )
+
     return parser.parse_args(args)
 
 
@@ -377,6 +448,7 @@ def main(options):
         date_regex=options.regex,
         original_filenames=options.original_names,
         timestamp=options.timestamp,
+        ctime=options.ctime,
         date_field=options.date_field,
         dry_run=options.dry_run,
         quiet=options.quiet,
@@ -391,7 +463,12 @@ def main(options):
         output_prefix=options.output_prefix,
         output_suffix=options.output_suffix,
         from_date=options.from_date,
-        to_date=options.to_date
+        to_date=options.to_date,
+        rename_in_place=options.rename_in_place,
+        camera_name_mode=options.camera_name_mode,
+        other_dir=options.other_dir,
+        fast_mode=options.fast_mode,
+        use_process_pool_for_exif=options.use_process_pool_for_exif,
     )
 
 
