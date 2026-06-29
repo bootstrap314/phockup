@@ -5,6 +5,8 @@ import sys
 import threading
 from subprocess import CalledProcessError, check_output
 
+_EXIFTOOL_TIME_TAGS = 'time:all'
+
 
 class Exif(object):
     def __init__(self, filename):
@@ -28,5 +30,9 @@ class Exif(object):
     def get_exif_command(filename):
         # Handle all platform variations
         if sys.platform == 'win32':
-            return f'exiftool -time:all -mimetype -j "{filename}"'
-        return f'exiftool -time:all -mimetype -j {shlex.quote(filename)}'
+            return 'exiftool -{} -mimetype -j "{}"'.format(
+                _EXIFTOOL_TIME_TAGS, filename
+            )
+        return 'exiftool -{} -mimetype -j {}'.format(
+            _EXIFTOOL_TIME_TAGS, shlex.quote(filename)
+        )

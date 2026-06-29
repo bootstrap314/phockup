@@ -29,6 +29,10 @@ VIDEO_EXTENSIONS = {
     '.m2ts', '.3gp', '.3g2'
 }
 
+_START_OF_DAY = '00:00:00'
+_END_OF_DAY = '23:59:59'
+_DATETIME_PARSE_FMT = '%Y-%m-%d %H:%M:%S'
+
 
 def _extract_exif_and_date(filename, timestamp, date_regex, date_field, ctime=False):
     """
@@ -118,9 +122,15 @@ class Phockup:
         self.from_date = args.get("from_date", None)
         self.to_date = args.get("to_date", None)
         if self.from_date is not None:
-            self.from_date = Date.strptime(f"{self.from_date} 00:00:00", "%Y-%m-%d %H:%M:%S")
+            self.from_date = Date.strptime(
+                '{} {}'.format(self.from_date, _START_OF_DAY),
+                _DATETIME_PARSE_FMT,
+            )
         if self.to_date is not None:
-            self.to_date = Date.strptime(f"{self.to_date} 23:59:59", "%Y-%m-%d %H:%M:%S")
+            self.to_date = Date.strptime(
+                '{} {}'.format(self.to_date, _END_OF_DAY),
+                _DATETIME_PARSE_FMT,
+            )
 
         if self.max_concurrency > 1:
             logger.info(f"Using {self.max_concurrency} workers to process files.")
@@ -155,7 +165,12 @@ class Phockup:
             self.print_action_report(run_time)
 
     def print_action_report(self, run_time):
-        logger.info(f"Processed {self.files_processed} files in {run_time:.2f} seconds. Average Throughput: {self.files_processed/run_time:.2f} files/second")
+        throughput = self.files_processed / run_time
+        logger.info(
+            'Processed %d files in %.2f seconds. '
+            'Average Throughput: %.2f files/second'
+            % (self.files_processed, run_time, throughput)
+        )
         if self.unknown_found:
             logger.info(f"Found {self.unknown_found} files without EXIF date data.")
         if self.duplicates_found:
