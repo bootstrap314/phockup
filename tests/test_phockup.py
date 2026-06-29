@@ -746,3 +746,58 @@ def test_from_date_to_date():
     assert len([name for name in os.listdir(dir4) if
                 os.path.isfile(os.path.join(dir4, name))]) == 0
     shutil.rmtree('output', ignore_errors=True)
+
+
+def test_skip_file_path_default_pattern(mocker, caplog):
+    shutil.rmtree('output', ignore_errors=True)
+    shutil.rmtree('input_skip_paths', ignore_errors=True)
+    os.makedirs('input_skip_paths/photos.@__thumb')
+    open('input_skip_paths/photos.@__thumb/thumb.jpg', 'w').close()
+    open('input_skip_paths/keep.jpg', 'w').close()
+
+    with caplog.at_level(logging.INFO):
+        Phockup('input_skip_paths', 'output')
+
+    assert 'photos.@__thumb/thumb.jpg' in caplog.text
+    assert "skipped, path contains '.@__thumb'" in caplog.text
+    assert os.path.isfile('input_skip_paths/photos.@__thumb/thumb.jpg')
+    assert os.path.isfile('output/unknown/keep.jpg')
+    shutil.rmtree('output', ignore_errors=True)
+    shutil.rmtree('input_skip_paths', ignore_errors=True)
+
+
+def test_skip_file_path_custom_pattern(mocker, caplog):
+    shutil.rmtree('output', ignore_errors=True)
+    shutil.rmtree('input_skip_paths', ignore_errors=True)
+    os.makedirs('input_skip_paths/@eaDir')
+    open('input_skip_paths/@eaDir/photo.jpg', 'w').close()
+    open('input_skip_paths/keep.jpg', 'w').close()
+
+    with caplog.at_level(logging.INFO):
+        Phockup('input_skip_paths', 'output',
+                skip_file_paths_containing=['@eaDir'])
+
+    assert '@eaDir/photo.jpg' in caplog.text
+    assert "skipped, path contains '@eaDir'" in caplog.text
+    assert os.path.isfile('input_skip_paths/@eaDir/photo.jpg')
+    assert os.path.isfile('output/unknown/keep.jpg')
+    shutil.rmtree('output', ignore_errors=True)
+    shutil.rmtree('input_skip_paths', ignore_errors=True)
+
+
+def test_skip_file_path_movedel_deletes(mocker, caplog):
+    shutil.rmtree('output', ignore_errors=True)
+    shutil.rmtree('input_skip_paths', ignore_errors=True)
+    os.makedirs('input_skip_paths/photos/.@__thumb')
+    thumb_path = 'input_skip_paths/photos/.@__thumb/thumb.jpg'
+    open(thumb_path, 'w').close()
+    open('input_skip_paths/keep.jpg', 'w').close()
+
+    with caplog.at_level(logging.INFO):
+        Phockup('input_skip_paths', 'output', movedel=True)
+
+    assert "deleted, path contains '.@__thumb'" in caplog.text
+    assert not os.path.isfile(thumb_path)
+    assert os.path.isfile('output/unknown/keep.jpg')
+    shutil.rmtree('output', ignore_errors=True)
+    shutil.rmtree('input_skip_paths', ignore_errors=True)

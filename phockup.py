@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import logging
 import logging.handlers
 import os
@@ -23,6 +24,33 @@ them in the proper directory for year, month and day.
 DEFAULT_DIR_FORMAT = ['%Y', '%m', '%d']
 
 logger = logging.getLogger('phockup')
+
+
+def parse_skip_file_paths_containing(value):
+    """Parse a JSON list of path substrings to skip, e.g. '["foo", "bar"]'."""
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in "'\"":
+        stripped = stripped[1:-1]
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(
+            "Invalid format for --skip-file-paths-containing. "
+            "Expected a JSON list of strings, e.g. "
+            '\'["pattern1", "pattern2"]\''
+        ) from exc
+    if not isinstance(parsed, list):
+        raise argparse.ArgumentTypeError(
+            "Invalid format for --skip-file-paths-containing. "
+            "Expected a JSON list of strings."
+        )
+    for item in parsed:
+        if not isinstance(item, str):
+            raise argparse.ArgumentTypeError(
+                "Invalid format for --skip-file-paths-containing. "
+                "Each list element must be a string."
+            )
+    return parsed
 
 
 def parse_args(args=sys.argv[1:]):
@@ -307,6 +335,25 @@ Example:
             DELETE source files which are determined to be duplicates of files
             already transferred.  Only valid in conjunction with both `--move`
             and `--skip-unknown`.
+
+            Also deletes source files whose path contains a pattern matched by
+            `--skip-file-paths-containing` (including built-in patterns).
+            """,
+    )
+
+    parser.add_argument(
+        '--skip-file-paths-containing',
+        type=parse_skip_file_paths_containing,
+        default=[],
+        metavar='LIST',
+        help="""\
+            Skip files immediately when their path contains any of the given
+            substrings, without reading EXIF metadata. Built-in patterns are
+            always applied (currently: .@__thumb).
+
+            Provide a JSON list wrapped in single quotes with each element in
+            double quotes, for example:
+                --skip-file-paths-containing='["@eaDir", ".synology"]'
             """,
     )
 
@@ -458,6 +505,7 @@ def main(options):
         max_concurrency=options.max_concurrency,
         no_date_dir=options.no_date_dir,
         skip_unknown=options.skip_unknown,
+        skip_file_paths_containing=options.skip_file_paths_containing,
         movedel=options.movedel,
         rmdirs=options.rmdirs,
         output_prefix=options.output_prefix,

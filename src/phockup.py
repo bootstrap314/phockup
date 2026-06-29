@@ -15,6 +15,7 @@ from src.exif import Exif
 
 logger = logging.getLogger('phockup')
 ignored_files = ('.DS_Store', 'Thumbs.db')
+DEFAULT_SKIP_FILE_PATH_PATTERNS = ('.@__thumb',)
 
 # Known file extensions for basic pre-filtering
 IMAGE_EXTENSIONS = {
@@ -89,8 +90,12 @@ class Phockup:
         self.ctime = args.get('ctime', False)
         self.date_field = args.get('date_field', False)
         self.skip_unknown = args.get("skip_unknown", False)
-        self.movedel = args.get("movedel", False),
-        self.rmdirs = args.get("rmdirs", False),
+        self.movedel = args.get("movedel", False)
+        user_skip_path_patterns = args.get('skip_file_paths_containing') or ()
+        self.skip_file_path_patterns = DEFAULT_SKIP_FILE_PATH_PATTERNS + tuple(
+            user_skip_path_patterns
+        )
+        self.rmdirs = args.get("rmdirs", False)
         self.dry_run = args.get('dry_run', False)
         self.progress = args.get('progress', False)
         self.rename_in_place = args.get("rename_in_place", False)
@@ -185,6 +190,29 @@ class Phockup:
             except OSError:
                 raise OSError(f"Cannot create output '{self.output_dir}' directory. No write access!")
 
+    def skip_file_path_match(self, path):
+        """Return the first skip pattern found in path, or None."""
+        for pattern in self.skip_file_path_patterns:
+            if pattern in path:
+                return pattern
+        return None
+
+    def handle_skip_file_path(self, full_path, matched_pattern):
+        """Skip or delete a file whose path contains a skip pattern."""
+        if self.movedel:
+            if not self.dry_run:
+                os.remove(full_path)
+            progress = (f"{full_path} => deleted, path contains "
+                        f"'{matched_pattern}'")
+        else:
+            progress = (f"{full_path} => skipped, path contains "
+                        f"'{matched_pattern}'")
+
+        if self.progress:
+            self.pbar.write(progress)
+        if not self.fast_mode:
+            logger.info(progress)
+
     def walk_directory(self):
         """
         Walk input directory recursively and call process_file for each file
@@ -207,6 +235,11 @@ class Phockup:
                     continue
 
                 full_path = os.path.join(root, filename)
+
+                matched_pattern = self.skip_file_path_match(full_path)
+                if matched_pattern is not None:
+                    self.handle_skip_file_path(full_path, matched_pattern)
+                    continue
 
                 if want_images or want_videos:
                     ext = os.path.splitext(filename)[1].lower()
