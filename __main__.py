@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
+import logging
 import sys
 
-from phockup import main
-from src.printer import Printer
+from phockup import main, parse_args, setup_logging
+
+logger = logging.getLogger('phockup')
 
 if __name__ == '__main__':
     try:
-        main(sys.argv[1:])
+        options = parse_args(sys.argv[1:])
+        setup_logging(options)
+        main(options)
+    except Exception as e:
+        logger.warning(e)
+        sys.exit(1)
     except KeyboardInterrupt:
-        Printer().empty().line('Exiting...')
-        sys.exit(0)
+        logger.error("Exiting phockup...")
+        sys.exit(1)
+    sys.exit(0)

@@ -34,7 +34,7 @@ class Date:
             date_object['minute'] if date_object.get('minute') else 0,
             date_object['second'] if date_object.get('second') else 0)
 
-    def from_exif(self, exif, timestamp=None, user_regex=None, date_field=None):
+    def from_exif(self, exif, timestamp=None, user_regex=None, date_field=None, ctime=None):
         if date_field:
             keys = date_field.split()
         else:
@@ -68,7 +68,7 @@ class Date:
             return parsed_date
         else:
             if self.filename:
-                return self.from_filename(user_regex, timestamp)
+                return self.from_filename(user_regex, timestamp, ctime)
             else:
                 return parsed_date
 
@@ -97,7 +97,7 @@ class Date:
             'subseconds': subseconds
         }
 
-    def from_filename(self, user_regex, timestamp=None):
+    def from_filename(self, user_regex, timestamp=None, ctime=None):
         # If missing datetime from EXIF data check if filename is in datetime
         # format. For this use a user provided regex if possible. Otherwise
         # assume a filename such as IMG_20160915_123456.jpg as default.
@@ -120,11 +120,43 @@ class Date:
                     'subseconds': ''
                 }
 
+        if ctime:
+            return self.from_ctime()
         if timestamp:
             return self.from_timestamp()
 
     def from_timestamp(self) -> dict:
         date = datetime.fromtimestamp(os.path.getmtime(self.filename))
+        return {
+            'date': date,
+            'subseconds': ''
+        }
+
+    def from_ctime(self) -> dict:
+        """
+        Use file creation time when EXIF and filename date are unavailable.
+
+        On macOS/BSD, st_birthtime is often the best approximation of creation
+        time. However, when files are copied into a new folder, birthtime can
+        become "now" while mtime may still reflect the original capture/import
+        date. To avoid surprising results (e.g. everything landing in the
+        current year), prefer the older of birthtime and mtime.
+        """
+        try:
+            st = os.stat(self.filename)
+            # Prefer birthtime (creation time) where available (e.g. macOS, BSD)
+            t = getattr(st, 'st_birthtime', None)
+            if t is None:
+                t = os.path.getctime(self.filename)
+            # If mtime is older, prefer it to avoid "copy time" birthdates.
+            try:
+                if getattr(st, 'st_mtime', None) is not None and st.st_mtime < t:
+                    t = st.st_mtime
+            except Exception:
+                pass
+            date = datetime.fromtimestamp(t)
+        except OSError:
+            return {'date': None, 'subseconds': ''}
         return {
             'date': date,
             'subseconds': ''

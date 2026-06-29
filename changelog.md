@@ -1,4 +1,12 @@
 # Changelog
+##### Unreleased
+* `--other-dir` to collect non-image and non-video files in a dedicated folder
+* `--camera-name-mode` (`prefix` or `suffix`) to include EXIF camera make/model in filenames
+* `--rename-in-place` to rename files already in the correct date hierarchy without copying or moving
+* `--ctime` to use file creation time when EXIF date is unavailable
+* `--fast-mode` to reduce logging and progress overhead for large runs
+* `--use-process-pool-for-exif` for CPU-bound EXIF extraction on multi-core systems
+* Faster duplicate detection using file size before full comparison
 ##### `1.13.0`
 * Implement `--rmdirs` [#225](https://github.com/ivandokov/phockup/pull/225)
 ##### `1.12.0`

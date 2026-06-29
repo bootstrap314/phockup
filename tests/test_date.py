@@ -147,3 +147,27 @@ def test_get_date_custom_regex_optional_time():
         "date": datetime(2015, 1, 27, 0, 0, 00),
         "subseconds": ""
     }
+
+
+def test_get_date_from_ctime_when_no_exif():
+    """
+    When EXIF and filename have no date, --ctime uses file creation/birth time.
+    """
+    result = Date("input/exif.jpg").from_exif({}, False, None, None, ctime=True)
+    assert result is not None
+    assert "date" in result
+    assert result["subseconds"] == ""
+    assert isinstance(result["date"], datetime)
+
+
+def test_get_date_from_ctime_prefers_older_mtime(mocker):
+    class _Stat:
+        st_birthtime = 2000000000.0
+        st_mtime = 1000000000.0
+
+    mocker.patch("os.stat", return_value=_Stat())
+    # Ensure we don't fall back to os.path.getctime in this test
+    mocker.patch("os.path.getctime", side_effect=AssertionError("should not be called"))
+
+    d = Date("any.jpg").from_ctime()
+    assert d["date"] == datetime.fromtimestamp(_Stat.st_mtime)

@@ -270,6 +270,21 @@ def test_process_other(mocker):
     shutil.rmtree('output', ignore_errors=True)
 
 
+def test_process_other_custom_dir(mocker):
+    """
+    Non-image / non-video files are collected into a dedicated directory
+    when other_dir is specified.
+    """
+    shutil.rmtree('output', ignore_errors=True)
+    mocker.patch.object(Phockup, 'check_directories')
+    mocker.patch.object(Phockup, 'walk_directory')
+    Phockup('input', 'output', other_dir='misc_other').process_file("input/other.txt")
+    assert os.path.isfile("output/misc_other/other.txt")
+    # Ensure the old default location is not used when other_dir is set
+    assert not os.path.isdir("output/unknown")
+    shutil.rmtree('output', ignore_errors=True)
+
+
 def test_process_move(mocker):
     shutil.rmtree('output', ignore_errors=True)
     mocker.patch.object(Phockup, 'check_directories')
@@ -438,6 +453,47 @@ def test_keep_original_filenames_and_filenames_case(mocker):
     shutil.rmtree('output', ignore_errors=True)
 
 
+def test_camera_name_prefix_in_filename(mocker):
+    shutil.rmtree('output', ignore_errors=True)
+    mocker.patch.object(Phockup, 'check_directories')
+    mocker.patch.object(Phockup, 'walk_directory')
+    mocker.patch.object(Exif, 'data')
+    Exif.data.return_value = {
+        "MIMEType": "image/jpeg",
+        "Make": "Canon",
+        "Model": "EOS 70D",
+        "CreateDate": "2017:01:01 01:01:01",
+    }
+    Phockup('input', 'output', camera_name_mode='prefix').process_file(
+        "input/exif.jpg"
+    )
+    # Entire filename is lower-cased when original_filenames is False
+    assert os.path.isfile(
+        "output/2017/01/01/canon-eos-70d_20170101-010101.jpg"
+    )
+    shutil.rmtree('output', ignore_errors=True)
+
+
+def test_camera_name_suffix_in_filename(mocker):
+    shutil.rmtree('output', ignore_errors=True)
+    mocker.patch.object(Phockup, 'check_directories')
+    mocker.patch.object(Phockup, 'walk_directory')
+    mocker.patch.object(Exif, 'data')
+    Exif.data.return_value = {
+        "MIMEType": "image/jpeg",
+        "Make": "Canon",
+        "Model": "EOS 70D",
+        "CreateDate": "2017:01:01 01:01:01",
+    }
+    Phockup('input', 'output', camera_name_mode='suffix').process_file(
+        "input/exif.jpg"
+    )
+    assert os.path.isfile(
+        "output/2017/01/01/20170101-010101_canon-eos-70d.jpg"
+    )
+    shutil.rmtree('output', ignore_errors=True)
+
+
 def test_maxdepth_zero():
     shutil.rmtree('output', ignore_errors=True)
     Phockup('input', 'output', maxdepth=0)
@@ -475,6 +531,101 @@ def test_maxconcurrency_five():
     Phockup('input', 'output', max_concurrency=5)
     validate_copy_operations()
     shutil.rmtree('output', ignore_errors=True)
+
+
+def test_fast_mode_disables_progress(mocker):
+    """
+    fast_mode should explicitly disable per-file progress reporting
+    regardless of the original progress flag value.
+    """
+    mocker.patch.object(Phockup, 'check_directories')
+    mocker.patch.object(Phockup, 'walk_directory')
+    phockup = Phockup('in', 'out', progress=True, fast_mode=True)
+    assert phockup.fast_mode is True
+    # fast_mode forces progress off to reduce overhead
+    assert phockup.progress is False
+
+
+def test_duplicate_detection_uses_size_short_circuit(mocker):
+    """
+    Duplicate detection should use a cheap size comparison to avoid
+    unnecessary full file comparisons when sizes differ.
+    """
+    shutil.rmtree('output', ignore_errors=True)
+    mocker.patch.object(Phockup, 'check_directories')
+    mocker.patch.object(Phockup, 'walk_directory')
+
+    phockup = Phockup('input', 'output')
+    # First call creates the target file in the output directory.
+    phockup.process_file("input/exif.jpg")
+    assert os.path.isfile("output/2017/01/01/20170101-010101.jpg")
+
+    # When sizes differ, filecmp.cmp should not be called.
+    mocker.patch('src.phockup.os.path.getsize', side_effect=[10, 20])
+    cmp_mock = mocker.patch('src.phockup.filecmp.cmp')
+
+    phockup.process_file("input/exif.jpg")
+
+    cmp_mock.assert_not_called()
+    shutil.rmtree('output', ignore_errors=True)
+
+
+def test_rename_in_place_when_hierarchy_matches(mocker):
+    """
+    When rename_in_place is enabled and the file is already in the expected
+    year/month/day hierarchy, the file should be renamed in place.
+    """
+    shutil.rmtree('input_rename', ignore_errors=True)
+    os.makedirs('input_rename/2017/01/01', exist_ok=True)
+
+    # Create a file whose name encodes the date; Date.from_exif will derive
+    # the target directory and filename from this.
+    src_path = 'input_rename/2017/01/01/date_20170101_010101.jpg'
+    open(src_path, "w").close()
+
+    mocker.patch.object(Phockup, 'check_directories')
+    mocker.patch.object(Phockup, 'walk_directory')
+    mocker.patch.object(Exif, 'data')
+    Exif.data.return_value = {
+        "MIMEType": "image/jpeg"
+    }
+
+    phockup = Phockup('input_rename', 'input_rename', rename_in_place=True)
+    phockup.process_file(src_path)
+
+    # Original should be gone, new name should exist in the same directory.
+    assert not os.path.isfile(src_path)
+    assert os.path.isfile('input_rename/2017/01/01/20170101-010101.jpg')
+
+    shutil.rmtree('input_rename', ignore_errors=True)
+
+
+def test_rename_in_place_skips_when_hierarchy_mismatch(mocker):
+    """
+    When rename_in_place is enabled but the file is not in the expected
+    year/month/day hierarchy, it should be skipped and not renamed.
+    """
+    shutil.rmtree('input_rename', ignore_errors=True)
+    os.makedirs('input_rename/wrong', exist_ok=True)
+
+    src_path = 'input_rename/wrong/date_20170101_010101.jpg'
+    open(src_path, "w").close()
+
+    mocker.patch.object(Phockup, 'check_directories')
+    mocker.patch.object(Phockup, 'walk_directory')
+    mocker.patch.object(Exif, 'data')
+    Exif.data.return_value = {
+        "MIMEType": "image/jpeg"
+    }
+
+    phockup = Phockup('input_rename', 'input_rename', rename_in_place=True)
+    phockup.process_file(src_path)
+
+    # File should remain unchanged in its original (incorrect) directory.
+    assert os.path.isfile(src_path)
+    assert not os.path.exists('input_rename/2017/01/01/20170101-010101.jpg')
+
+    shutil.rmtree('input_rename', ignore_errors=True)
 
 
 def validate_copy_operations(prefix=None, suffix=None):
@@ -595,3 +746,58 @@ def test_from_date_to_date():
     assert len([name for name in os.listdir(dir4) if
                 os.path.isfile(os.path.join(dir4, name))]) == 0
     shutil.rmtree('output', ignore_errors=True)
+
+
+def test_skip_file_path_default_pattern(mocker, caplog):
+    shutil.rmtree('output', ignore_errors=True)
+    shutil.rmtree('input_skip_paths', ignore_errors=True)
+    os.makedirs('input_skip_paths/photos.@__thumb')
+    open('input_skip_paths/photos.@__thumb/thumb.jpg', 'w').close()
+    open('input_skip_paths/keep.jpg', 'w').close()
+
+    with caplog.at_level(logging.INFO):
+        Phockup('input_skip_paths', 'output')
+
+    assert 'photos.@__thumb/thumb.jpg' in caplog.text
+    assert "skipped, path contains '.@__thumb'" in caplog.text
+    assert os.path.isfile('input_skip_paths/photos.@__thumb/thumb.jpg')
+    assert os.path.isfile('output/unknown/keep.jpg')
+    shutil.rmtree('output', ignore_errors=True)
+    shutil.rmtree('input_skip_paths', ignore_errors=True)
+
+
+def test_skip_file_path_custom_pattern(mocker, caplog):
+    shutil.rmtree('output', ignore_errors=True)
+    shutil.rmtree('input_skip_paths', ignore_errors=True)
+    os.makedirs('input_skip_paths/@eaDir')
+    open('input_skip_paths/@eaDir/photo.jpg', 'w').close()
+    open('input_skip_paths/keep.jpg', 'w').close()
+
+    with caplog.at_level(logging.INFO):
+        Phockup('input_skip_paths', 'output',
+                skip_file_paths_containing=['@eaDir'])
+
+    assert '@eaDir/photo.jpg' in caplog.text
+    assert "skipped, path contains '@eaDir'" in caplog.text
+    assert os.path.isfile('input_skip_paths/@eaDir/photo.jpg')
+    assert os.path.isfile('output/unknown/keep.jpg')
+    shutil.rmtree('output', ignore_errors=True)
+    shutil.rmtree('input_skip_paths', ignore_errors=True)
+
+
+def test_skip_file_path_movedel_deletes(mocker, caplog):
+    shutil.rmtree('output', ignore_errors=True)
+    shutil.rmtree('input_skip_paths', ignore_errors=True)
+    os.makedirs('input_skip_paths/photos/.@__thumb')
+    thumb_path = 'input_skip_paths/photos/.@__thumb/thumb.jpg'
+    open(thumb_path, 'w').close()
+    open('input_skip_paths/keep.jpg', 'w').close()
+
+    with caplog.at_level(logging.INFO):
+        Phockup('input_skip_paths', 'output', movedel=True)
+
+    assert "deleted, path contains '.@__thumb'" in caplog.text
+    assert not os.path.isfile(thumb_path)
+    assert os.path.isfile('output/unknown/keep.jpg')
+    shutil.rmtree('output', ignore_errors=True)
+    shutil.rmtree('input_skip_paths', ignore_errors=True)

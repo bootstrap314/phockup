@@ -10,7 +10,7 @@ Media sorting tool to organize photos and videos from your camera in folders by 
 ## How it works
 The software will collect all files from the input directory and copy them to the output directory without changing the files content. It will only rename the files and place them in the proper directory for year, month and day.
 
-All files which are not images or videos or those which do not have creation date information will be placed in a directory called `unknown` without file name change. By doing this you can be sure that the input directory can be safely deleted after the successful process completion because **all** files from the input directory have a copy in the output directory.
+All files which are not images or videos or those which do not have creation date information will be placed in a directory called `unknown` without file name change (or in a folder you specify with `--other-dir`). By doing this you can be sure that the input directory can be safely deleted after the successful process completion because **all** files from the input directory have a copy in the output directory.
 
 If the target file already exists, its checksum is compared with the source to determine if it is a duplicate. If the checksums are different, we do not have a duplicate and the target filename will be suffixed with a number, for example "-1". If the checksums match, the copy operation will be skipped.
 
@@ -252,11 +252,42 @@ If any of the photos does not have date information you can use the `-r | --rege
 
 As a last resort, specify the `-t | --timestamp` option to use the file modification timestamp. This may not be accurate in all cases but can provide some kind of date if you'd rather it not go into the `unknown` folder.
 
+Alternatively, use `--ctime` to use the file's creation time when EXIF and filename regex do not provide a date. On macOS and BSD this uses birth time when available; if birth time is newer than modification time (for example after copying files into a new folder), the older of the two is used so photos are less likely to be sorted into the current year by mistake.
+
+### Non-image and non-video files
+By default, files that are not recognized as images or videos are copied into the `unknown` directory (or the name set with `--no-date-dir`). Use `--other-dir` to collect them in a dedicated folder instead:
+
+```
+phockup ~/Pictures/camera ~/Pictures/sorted --other-dir=documents
+```
+
+This places files such as `.txt` or `.pdf` under `~/Pictures/sorted/documents/` rather than `unknown`.
+
+### Camera name in filenames
+Include the camera make and model from EXIF in generated filenames with `--camera-name-mode`:
+
+```
+phockup ~/Pictures/camera ~/Pictures/sorted --camera-name-mode=prefix
+phockup ~/Pictures/camera ~/Pictures/sorted --camera-name-mode=suffix
+```
+
+- `prefix` produces names like `canon-eos-70d_20170101-010101.jpg`
+- `suffix` produces names like `20170101-010101_canon-eos-70d.jpg`
+
+This option does not apply when using `-o | --original-names`.
+
 ### Move files
 Instead of copying the process will move all files from the INPUTDIR to the OUTPUTDIR by using the flag `-m | --move`. This is useful when working with a big collection of files and the remaining free space is not enough to make a copy of the INPUTDIR.
 
 ### Link files
 Instead of copying the process will create hard link all files from the INPUTDIR into new structure in OUTPUTDIR by using the flag `-l | --link`. This is useful when working with good structure of photos in INPUTDIR (like folders per device).
+
+### Rename in place
+Use `--rename-in-place` when files are already organized in the correct year/month/day hierarchy and you only want to rename them (for example to the standard `YYYYMMDD-hhmmss` format). Phockup checks that each file's current directory matches the expected output path and skips files that are not in the right place. This mode is mutually exclusive with `--move` and `--link`. Use the same path for input and output:
+
+```
+phockup ~/Pictures/sorted ~/Pictures/sorted --rename-in-place
+```
 
 ### Original filenames
 Organize the files in selected format or using the default year/month/day format but keep original filenames by using the flag `-o | --original-names`.
@@ -325,6 +356,16 @@ Concurrently processing files does have an impact on the order that
 messages are written to the console/log and the ability to quickly
 terminate the program, as the execution waits for all in-flight
 operations to complete before shutting down.
+
+### Fast mode
+For large collections, `--fast-mode` reduces per-file logging and disables the progress bar (even if `--progress` is set) to improve throughput. Use with `--max-concurrency` when processing many files:
+
+```
+phockup ~/Pictures/camera ~/Pictures/sorted --fast-mode --max-concurrency=8
+```
+
+### EXIF process pool
+When EXIF parsing is CPU-bound, `--use-process-pool-for-exif` runs date extraction in a process pool. This can help on multi-core systems when used together with higher `--max-concurrency` values.
 
 ## Development
 
