@@ -122,7 +122,7 @@ class _WideHelpFormatter(HelpFormatter):
         first_col = widths[0] + col_spacing
 
         for first, second in iter_rows(rows, len(widths)):
-            self.write(f"{'':>{self.current_indent}}{first}")
+            self.write(' ' * self.current_indent + first)
             if not second:
                 self.write("\n")
                 continue
@@ -136,10 +136,9 @@ class _WideHelpFormatter(HelpFormatter):
 
             if lines:
                 self.write(f"{lines[0]}\n")
+                continuation_indent = first_col + self.current_indent
                 for line in lines[1:]:
-                    self.write(
-                        f"{'':>{first_col + self.current_indent}}{line}\n"
-                    )
+                    self.write(' ' * continuation_indent + line + '\n')
             else:
                 self.write("\n")
 
