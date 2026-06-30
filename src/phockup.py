@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import sys
+import threading
 import time
 
 from tqdm import tqdm
@@ -107,6 +108,7 @@ class Phockup:
         self.max_depth = args.get('max_depth', -1)
         # default to concurrency of one to retain existing behavior
         self.max_concurrency = args.get("max_concurrency", 1)
+        self._file_lock = threading.Lock()
         # Optional process pool toggle for EXIF/date extraction when CPU bound
         self.use_process_pool_for_exif = args.get("use_process_pool_for_exif", False)
         # Optional directory where non-image / non-video files are collected
@@ -489,85 +491,86 @@ class Phockup:
                     logger.info(progress)
                     break
 
-            if os.path.isfile(target_file):
-                # Duplicate detection: first use a quick size comparison to
-                # rule out obvious non-duplicates, then fall back to a full
-                # byte-for-byte comparison to retain original behavior.
-                is_duplicate = False
-                if filename != target_file:
-                    try:
-                        if os.path.getsize(filename) == os.path.getsize(target_file):
-                            is_duplicate = filecmp.cmp(
-                                filename,
-                                target_file,
-                                shallow=False,
-                            )
-                    except OSError:
-                        is_duplicate = False
+            with self._file_lock:
+                if os.path.isfile(target_file):
+                    # Duplicate detection: first use a quick size comparison to
+                    # rule out obvious non-duplicates, then fall back to a full
+                    # byte-for-byte comparison to retain original behavior.
+                    is_duplicate = False
+                    if filename != target_file:
+                        try:
+                            if os.path.getsize(filename) == os.path.getsize(target_file):
+                                is_duplicate = filecmp.cmp(
+                                    filename,
+                                    target_file,
+                                    shallow=False,
+                                )
+                        except OSError:
+                            is_duplicate = False
 
-                if is_duplicate:
-                    if self.movedel and self.move and self.skip_unknown:
-                        if not self.dry_run:
-                            os.remove(filename)
-                        progress = f'{progress} => deleted, duplicated file {target_file}'
+                    if is_duplicate:
+                        if self.movedel and self.move and self.skip_unknown:
+                            if not self.dry_run:
+                                os.remove(filename)
+                            progress = f'{progress} => deleted, duplicated file {target_file}'
+                        else:
+                            progress = f'{progress} => skipped, duplicated file {target_file}'
+                        self.duplicates_found += 1
+                        if self.progress:
+                            self.pbar.write(progress)
+                        if not self.fast_mode:
+                            logger.info(progress)
+                        break
+                else:
+                    if self.rename_in_place:
+                        try:
+                            # Treat in-place renames as "moves" for reporting
+                            self.files_moved += 1
+                            if not self.dry_run and filename != target_file:
+                                os.rename(filename, target_file)
+                        except FileNotFoundError:
+                            progress = f'{progress} => skipped, no such file or directory'
+                            if self.progress:
+                                self.pbar.write(progress)
+                            logger.warning(progress)
+                            break
+                    elif self.move:
+                        try:
+                            self.files_moved += 1
+                            if not self.dry_run:
+                                shutil.move(filename, target_file)
+                        except FileNotFoundError:
+                            progress = f'{progress} => skipped, no such file or directory'
+                            if self.progress:
+                                self.pbar.write(progress)
+                            logger.warning(progress)
+                            break
+                    elif self.link and not self.dry_run:
+                        os.link(filename, target_file)
                     else:
-                        progress = f'{progress} => skipped, duplicated file {target_file}'
-                    self.duplicates_found += 1
+                        try:
+                            self.files_copied += 1
+                            if not self.dry_run:
+                                shutil.copy2(filename, target_file)
+                        except FileNotFoundError:
+                            progress = f'{progress} => skipped, no such file or directory'
+                            if self.progress:
+                                self.pbar.write(progress)
+                            logger.warning(progress)
+                            break
+
+                    progress = f'{progress} => {target_file}'
                     if self.progress:
                         self.pbar.write(progress)
                     if not self.fast_mode:
                         logger.info(progress)
+
+                    self.process_xmp(filename, target_file_name, suffix, output)
                     break
-            else:
-                if self.rename_in_place:
-                    try:
-                        # Treat in-place renames as "moves" for reporting
-                        self.files_moved += 1
-                        if not self.dry_run and filename != target_file:
-                            os.rename(filename, target_file)
-                    except FileNotFoundError:
-                        progress = f'{progress} => skipped, no such file or directory'
-                        if self.progress:
-                            self.pbar.write(progress)
-                        logger.warning(progress)
-                        break
-                elif self.move:
-                    try:
-                        self.files_moved += 1
-                        if not self.dry_run:
-                            shutil.move(filename, target_file)
-                    except FileNotFoundError:
-                        progress = f'{progress} => skipped, no such file or directory'
-                        if self.progress:
-                            self.pbar.write(progress)
-                        logger.warning(progress)
-                        break
-                elif self.link and not self.dry_run:
-                    os.link(filename, target_file)
-                else:
-                    try:
-                        self.files_copied += 1
-                        if not self.dry_run:
-                            shutil.copy2(filename, target_file)
-                    except FileNotFoundError:
-                        progress = f'{progress} => skipped, no such file or directory'
-                        if self.progress:
-                            self.pbar.write(progress)
-                        logger.warning(progress)
-                        break
 
-                progress = f'{progress} => {target_file}'
-                if self.progress:
-                    self.pbar.write(progress)
-                if not self.fast_mode:
-                    logger.info(progress)
-
-                self.process_xmp(filename, target_file_name, suffix, output)
-                break
-
-            suffix += 1
-            target_split = os.path.splitext(target_file_path)
-            target_file = f'{target_split[0]}-{suffix}{target_split[1]}'
+                suffix += 1
+                target_split = os.path.splitext(target_file_path)
+                target_file = f'{target_split[0]}-{suffix}{target_split[1]}'
 
         self.files_processed += 1
         if self.progress:
